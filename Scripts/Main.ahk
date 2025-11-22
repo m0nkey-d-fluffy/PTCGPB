@@ -979,7 +979,7 @@ RemoveNonVipFriends() {
 
 ; RemoveUsersFromListWithWonderPick - Remove users by name from a list, checking wonderpick periodically
 ; Removes 4 users, then checks wonderpick 3 times, repeating until 40 users are removed
-; IMPROVED: Scans names directly from friend list view (no click required) to avoid list reordering issues
+; IMPROVED: After each removal, exits and re-enters friend list, scrolls from top to find next match
 RemoveUsersFromListWithWonderPick() {
     global GPTest, failSafe, scaleParam, winTitle
 
@@ -1016,30 +1016,11 @@ RemoveUsersFromListWithWonderPick() {
     LogToFile("RemoveUsersFromListWithWonderPick: Starting with " . removeList.Length() . " usernames to remove", "GPTestLog.txt")
     Sleep, 2000
 
-    ; Navigate to Social screen
-    failSafe := A_TickCount
-    failSafeTime := 0
-    Loop {
-        adbClick(143, 518)
-        if(FindOrLoseImage(120, 500, 155, 530, , "Social", 0, failSafeTime))
-            break
-        Delay(5)
-        failSafeTime := (A_TickCount - failSafe) // 1000
-        CreateStatusMessage("Navigating to Social. " . failSafeTime "/90 seconds")
-        if (failSafeTime > 90) {
-            CreateStatusMessage("Failed to navigate to Social screen. Aborting.",,,, false)
-            return
-        }
-    }
-    FindImageAndClick(226, 100, 270, 135, , "Add", 38, 460, 500)
-    Delay(3)
-
     ; Tracking variables
     totalRemoved := 0
     cycleRemoved := 0
-    scrolledWithoutMatch := 0
 
-    ; Main removal loop
+    ; Main removal loop - each iteration finds and removes ONE user
     Loop {
         ; Check if we've reached max removals
         if (totalRemoved >= maxRemovals) {
@@ -1048,7 +1029,7 @@ RemoveUsersFromListWithWonderPick() {
             return
         }
 
-        ; Check if it's time to do wonderpick checks
+        ; Check if it's time to do wonderpick checks (after every 4 removals)
         if (cycleRemoved >= usersPerCycle && totalRemoved > 0) {
             CreateStatusMessage("Removed " . cycleRemoved . " users this cycle.`nChecking WonderPick " . wonderpickChecks . " times...",,,, false)
             LogToFile("RemoveUsersFromListWithWonderPick: Cycle complete, checking wonderpick " . wonderpickChecks . " times", "GPTestLog.txt")
@@ -1062,87 +1043,122 @@ RemoveUsersFromListWithWonderPick() {
                 Sleep, 2000
             }
 
-            ; Navigate back to friends list
-            CreateStatusMessage("Returning to friends list...",,,, false)
-            NavigateToFriendsList()
-
             cycleRemoved := 0
         }
 
-        ; Scan all visible friends on the list (without clicking)
-        CreateStatusMessage("Scanning friend list for matches...",,,, false)
-        visibleFriends := ScanFriendListNames()
-
-        ; Check each visible friend against our removal list
-        matchFound := false
-        matchIndex := 0
-        matchedParsedName := ""
-        matchedTargetName := ""
-
-        for idx, friendInfo in visibleFriends {
-            parsedName := friendInfo.name
-            if (parsedName = "")
-                continue
-
-            ; Check against all names in removal list
-            for listIdx, targetName in removeList {
-                if (FuzzyNameMatch(parsedName, targetName)) {
-                    matchFound := true
-                    matchIndex := idx
-                    matchedParsedName := parsedName
-                    matchedTargetName := targetName
-                    break
-                }
-            }
-            if (matchFound)
-                break
-        }
-
-        if (matchFound) {
-            ; Found a match! Click on that specific friend and remove them
-            friendInfo := visibleFriends[matchIndex]
-            clickY := friendInfo.clickY
-
-            CreateStatusMessage("Match found! Removing: " . matchedParsedName . "`n(Matched: " . matchedTargetName . ")`nTotal: " . (totalRemoved + 1) . "/" . maxRemovals,,,, false)
-            LogToFile("RemoveUsersFromListWithWonderPick: Removing " . matchedParsedName . " (matched " . matchedTargetName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
-            Sleep, 500
-
-            ; Click on the friend to open their profile
-            adbClick(138, clickY)
-            Delay(2)
-
-            ; Perform the removal
-            FindImageAndClick(135, 355, 160, 385, , "Remove", 145, 407, 500)
-            FindImageAndClick(70, 395, 100, 420, , "Send2", 200, 372, 500)
-            Delay(1)
-
-            ; Return to friends list
-            FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
-            Delay(3)
-
-            totalRemoved++
-            cycleRemoved++
-            scrolledWithoutMatch := 0
-
-            ; Don't scroll - list will refresh with remaining friends
-        } else {
-            ; No match found in current view, scroll to see more friends
-            CreateStatusMessage("No matches in view. Scrolling... (" . scrolledWithoutMatch . "/15)",,,, false)
-            ScrollFriendList()
-            scrolledWithoutMatch++
-        }
-
-        ; Safety check - if we've scrolled a lot without finding matches, give up
-        if (scrolledWithoutMatch > 15) {
-            CreateStatusMessage("No more matching users found.`nRemoved " . totalRemoved . " total.",,,, false)
-            LogToFile("RemoveUsersFromListWithWonderPick: Stopped - no matches after many scrolls. Removed " . totalRemoved, "GPTestLog.txt")
+        ; === FRESH START: Navigate to Social and enter friend list from scratch ===
+        CreateStatusMessage("Entering friend list... (" . totalRemoved . "/" . maxRemovals . " removed)",,,, false)
+        if (!GoToSocialScreen()) {
+            CreateStatusMessage("Failed to navigate to Social. Aborting.",,,, false)
             return
         }
 
-        if (!GPTest) {
-            Return
+        ; Enter the friends list
+        FindImageAndClick(226, 100, 270, 135, , "Add", 38, 460, 500)
+        Delay(3)
+
+        ; === SCROLL THROUGH ENTIRE LIST looking for a match ===
+        matchFound := false
+        scrollCount := 0
+        maxScrolls := 50  ; Safety limit
+        previousNames := ""
+
+        Loop {
+            if (scrollCount >= maxScrolls) {
+                CreateStatusMessage("Reached scroll limit.",,,, false)
+                break
+            }
+
+            ; Scan visible friends (3 at a time)
+            CreateStatusMessage("Scanning... (scroll " . scrollCount . "/" . maxScrolls . ")`nRemoved: " . totalRemoved . "/" . maxRemovals,,,, false)
+            visibleFriends := ScanFriendListNames()
+
+            ; Build a string of current names to detect end of list
+            currentNames := ""
+            for idx, friendInfo in visibleFriends {
+                currentNames .= friendInfo.name . "|"
+            }
+
+            ; Check if we've reached the end (same names as before after scrolling)
+            if (currentNames = previousNames && scrollCount > 0) {
+                CreateStatusMessage("Reached end of friend list.",,,, false)
+                break
+            }
+            previousNames := currentNames
+
+            ; Check each visible friend against our removal list
+            for idx, friendInfo in visibleFriends {
+                parsedName := friendInfo.name
+                if (parsedName = "")
+                    continue
+
+                ; Check against all names in removal list
+                for listIdx, targetName in removeList {
+                    if (FuzzyNameMatch(parsedName, targetName)) {
+                        ; === FOUND A MATCH! Remove this friend ===
+                        matchFound := true
+                        clickY := friendInfo.clickY
+
+                        CreateStatusMessage("MATCH: " . parsedName . "`n-> " . targetName . "`nRemoving... (" . (totalRemoved + 1) . "/" . maxRemovals . ")",,,, false)
+                        LogToFile("RemoveUsersFromListWithWonderPick: Removing " . parsedName . " (matched " . targetName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
+                        Sleep, 500
+
+                        ; Click on the friend to open their profile
+                        adbClick(138, clickY)
+                        Delay(2)
+
+                        ; Perform the removal
+                        FindImageAndClick(135, 355, 160, 385, , "Remove", 145, 407, 500)
+                        FindImageAndClick(70, 395, 100, 420, , "Send2", 200, 372, 500)
+                        Delay(1)
+
+                        totalRemoved++
+                        cycleRemoved++
+
+                        ; Exit all inner loops - will re-enter friend list fresh
+                        break 3
+                    }
+                }
+            }
+
+            ; No match in current view, scroll down to see more
+            ScrollFriendList()
+            scrollCount++
+            Sleep, 500
+
+            if (!GPTest)
+                return
         }
+
+        ; If we scrolled through entire list without finding a match, we're done
+        if (!matchFound) {
+            CreateStatusMessage("No more matching users in list.`nTotal removed: " . totalRemoved,,,, false)
+            LogToFile("RemoveUsersFromListWithWonderPick: Finished - no more matches. Removed " . totalRemoved, "GPTestLog.txt")
+            return
+        }
+
+        if (!GPTest)
+            return
     }
+}
+
+; GoToSocialScreen - Navigate to the Social screen
+GoToSocialScreen() {
+    global failSafe
+
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick(143, 518)
+        if(FindOrLoseImage(120, 500, 155, 530, , "Social", 0, failSafeTime))
+            break
+        Delay(5)
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        CreateStatusMessage("Navigating to Social... " . failSafeTime "/90s")
+        if (failSafeTime > 90)
+            return false
+    }
+    return true
 }
 
 ; ScanFriendListNames - Scan the friend list screen and extract names via OCR
