@@ -810,7 +810,15 @@ GetNeedle(Path) {
 GPTestScript() {
     global triggerTestNeeded
     triggerTestNeeded := false
-    RemoveNonVipFriends()
+
+    ; Check if remove_users.txt exists - if so, use the new removal with wonderpick method
+    removeListFile := A_ScriptDir . "\..\remove_users.txt"
+    if (FileExist(removeListFile)) {
+        RemoveUsersFromListWithWonderPick()
+    } else {
+        ; Fall back to original VIP-based removal
+        RemoveNonVipFriends()
+    }
 }
 
 ; Automation script for removing Non-VIP firends.
@@ -963,6 +971,364 @@ RemoveNonVipFriends() {
             Return
         }
     }
+}
+
+; ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+; ~~~ GP Test Mode: Remove Users from List with WonderPick Check  ~~~
+; ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+; RemoveUsersFromListWithWonderPick - Remove users by name from a list, checking wonderpick periodically
+; Removes 4 users, then checks wonderpick 3 times, repeating until 40 users are removed
+RemoveUsersFromListWithWonderPick() {
+    global GPTest, failSafe, scaleParam
+
+    ; Configuration
+    usersPerCycle := 4          ; Remove this many users before checking wonderpick
+    wonderpickChecks := 3       ; Check wonderpick this many times after each cycle
+    maxRemovals := 40           ; Stop after this many total removals
+
+    ; Read usernames from file
+    removeListFile := A_ScriptDir . "\..\remove_users.txt"
+    if (!FileExist(removeListFile)) {
+        CreateStatusMessage("remove_users.txt not found!`nCreate the file with one username per line.",,,, false)
+        LogToFile("RemoveUsersFromListWithWonderPick: remove_users.txt not found at " . removeListFile, "GPTestLog.txt")
+        return
+    }
+
+    ; Load usernames into array
+    removeList := []
+    FileRead, fileContent, %removeListFile%
+    Loop, Parse, fileContent, `n, `r
+    {
+        trimmedName := Trim(A_LoopField)
+        if (trimmedName != "")
+            removeList.Push(trimmedName)
+    }
+
+    if (removeList.Length() = 0) {
+        CreateStatusMessage("remove_users.txt is empty!`nAdd usernames (one per line) to remove.",,,, false)
+        LogToFile("RemoveUsersFromListWithWonderPick: remove_users.txt is empty", "GPTestLog.txt")
+        return
+    }
+
+    CreateStatusMessage("Loaded " . removeList.Length() . " usernames to remove.`nTarget: " . maxRemovals . " removals",,,, false)
+    LogToFile("RemoveUsersFromListWithWonderPick: Starting with " . removeList.Length() . " usernames to remove", "GPTestLog.txt")
+    Sleep, 2000
+
+    ; Navigate to Social screen
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick(143, 518)
+        if(FindOrLoseImage(120, 500, 155, 530, , "Social", 0, failSafeTime))
+            break
+        Delay(5)
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        CreateStatusMessage("Navigating to Social. " . failSafeTime "/90 seconds")
+        if (failSafeTime > 90) {
+            CreateStatusMessage("Failed to navigate to Social screen. Aborting.",,,, false)
+            return
+        }
+    }
+    FindImageAndClick(226, 100, 270, 135, , "Add", 38, 460, 500)
+    Delay(3)
+
+    ; Tracking variables
+    totalRemoved := 0
+    cycleRemoved := 0
+    friendIndex := 0
+    scrolledWithoutMatch := 0
+    currentListIndex := 1       ; Track which name in the list we're looking for
+
+    ; Main removal loop
+    Loop {
+        ; Check if we've reached max removals
+        if (totalRemoved >= maxRemovals) {
+            CreateStatusMessage("Completed! Removed " . totalRemoved . " users.`nGP Test finished.",,,, false)
+            LogToFile("RemoveUsersFromListWithWonderPick: Completed - removed " . totalRemoved . " users", "GPTestLog.txt")
+            return
+        }
+
+        ; Check if we've gone through all names in the list
+        if (currentListIndex > removeList.Length()) {
+            CreateStatusMessage("Finished list! Removed " . totalRemoved . " of " . maxRemovals . " target.`nRestarting from beginning of list...",,,, false)
+            currentListIndex := 1
+            if (scrolledWithoutMatch > 10) {
+                CreateStatusMessage("No more matching users found. Stopping.",,,, false)
+                LogToFile("RemoveUsersFromListWithWonderPick: No more matches found after " . totalRemoved . " removals", "GPTestLog.txt")
+                return
+            }
+        }
+
+        ; Check if it's time to do wonderpick checks
+        if (cycleRemoved >= usersPerCycle && totalRemoved > 0) {
+            CreateStatusMessage("Removed " . cycleRemoved . " users this cycle.`nChecking WonderPick " . wonderpickChecks . " times...",,,, false)
+            LogToFile("RemoveUsersFromListWithWonderPick: Cycle complete, checking wonderpick " . wonderpickChecks . " times", "GPTestLog.txt")
+            Sleep, 1500
+
+            ; Do wonderpick checks
+            Loop, %wonderpickChecks% {
+                currentCheck := A_Index
+                CreateStatusMessage("WonderPick check " . currentCheck . "/" . wonderpickChecks,,,, false)
+                DoWonderPickCheck()
+                Sleep, 2000
+            }
+
+            ; Navigate back to friends list
+            CreateStatusMessage("Returning to friends list...",,,, false)
+            NavigateToFriendsList()
+
+            cycleRemoved := 0
+            friendIndex := 0
+        }
+
+        ; Click on friend at current position
+        friendClickY := 195 + (95 * friendIndex)
+        if (FindImageAndClick(75, 400, 105, 420, , "Friend", 138, friendClickY, 500, 3)) {
+            Delay(1)
+
+            ; Parse the friend's name (we need names for this operation)
+            parseFriendResult := ParseFriendInfo(friendCode, friendName, parseFriendCodeResult, parseFriendNameResult, true)
+
+            if (!parseFriendNameResult || friendName = "") {
+                CreateStatusMessage("Couldn't parse friend name. Skipping...",,,, false)
+                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
+                Delay(2)
+                if (friendIndex < 2)
+                    friendIndex++
+                else {
+                    ScrollFriendList()
+                    friendIndex := 0
+                }
+                continue
+            }
+
+            ; Check if this friend's name matches any in our removal list
+            matchFound := false
+            matchedName := ""
+            for idx, targetName in removeList {
+                if (FuzzyNameMatch(friendName, targetName)) {
+                    matchFound := true
+                    matchedName := targetName
+                    break
+                }
+            }
+
+            if (matchFound) {
+                ; Remove this friend
+                CreateStatusMessage("Match found! Removing: " . friendName . "`n(Matched: " . matchedName . ")`nTotal removed: " . (totalRemoved + 1) . "/" . maxRemovals,,,, false)
+                LogToFile("RemoveUsersFromListWithWonderPick: Removing " . friendName . " (matched " . matchedName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
+                Sleep, 1000
+
+                ; Perform the removal
+                FindImageAndClick(135, 355, 160, 385, , "Remove", 145, 407, 500)
+                FindImageAndClick(70, 395, 100, 420, , "Send2", 200, 372, 500)
+                Delay(1)
+                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
+                Delay(3)
+
+                totalRemoved++
+                cycleRemoved++
+                scrolledWithoutMatch := 0
+
+                ; Don't increment friendIndex since the list shifted
+            } else {
+                ; No match, skip this friend
+                CreateStatusMessage("No match: " . friendName . "`nLooking for matches in list...",,,, false)
+                Sleep, 500
+                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
+                Delay(2)
+
+                if (friendIndex < 2)
+                    friendIndex++
+                else {
+                    ScrollFriendList()
+                    friendIndex := 0
+                    scrolledWithoutMatch++
+                }
+            }
+        } else {
+            ; Couldn't click on a friend, might need to scroll or we're at end
+            If (FindOrLoseImage(226, 100, 270, 135, , "Add", 0)) {
+                ; Small scroll to adjust
+                X := 138
+                Y1 := 380
+                Y2 := 355
+                Delay(3)
+                adbSwipe(X . " " . Y1 . " " . X . " " . Y2 . " " . 200)
+                Sleep, 500
+                scrolledWithoutMatch++
+            } else {
+                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 508, 500)
+                Delay(3)
+            }
+        }
+
+        ; Safety check - if we've scrolled a lot without finding matches, give up
+        if (scrolledWithoutMatch > 15) {
+            CreateStatusMessage("No more matching users found.`nRemoved " . totalRemoved . " total.",,,, false)
+            LogToFile("RemoveUsersFromListWithWonderPick: Stopped - no matches after many scrolls. Removed " . totalRemoved, "GPTestLog.txt")
+            return
+        }
+
+        if (!GPTest) {
+            Return
+        }
+    }
+}
+
+; FuzzyNameMatch - Check if two names match with some tolerance for OCR errors
+FuzzyNameMatch(parsedName, targetName) {
+    ; Exact match (case insensitive)
+    if (parsedName = targetName)
+        return true
+
+    ; Use similarity score if available
+    similarityScore := SimilarityScore(parsedName, targetName)
+    if (similarityScore > 0.75)
+        return true
+
+    return false
+}
+
+; DoWonderPickCheck - Navigate to wonderpick and do one pick if available
+DoWonderPickCheck() {
+    global scaleParam
+
+    ; Navigate to main screen first
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick(35, 515)  ; Click home
+        Sleep, 1000
+        if (FindOrLoseImage(191, 393, 211, 411, , "Shop", 0, failSafeTime))
+            break
+        if (FindOrLoseImage(20, 500, 55, 530, , "Home", 0, failSafeTime))
+            break
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        if (failSafeTime > 30)
+            return
+    }
+
+    ; Click on WonderPick
+    FindImageAndClick(240, 80, 265, 100, , "WonderPick", 59, 429, 2000, 5)
+
+    ; Check if we can do a wonderpick
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        ; Click on first wonderpick slot
+        adbClick(80, 390)
+        Sleep, 500
+        adbClick(80, 460)  ; backup second slot
+
+        ; Check if no energy
+        if(FindOrLoseImage(37, 424, 57, 446, , "noWPenergy", 0, failSafeTime)) {
+            CreateStatusMessage("No WonderPick energy!",,,, false)
+            Sleep, 1000
+            adbClick(137, 505)
+            Sleep, 1000
+            return
+        }
+
+        ; Check if we found a card to pick
+        if(FindOrLoseImage(160, 330, 200, 370, , "Card", 0, failSafeTime)) {
+            break
+        }
+
+        ; Handle any buttons/popups
+        if(FindOrLoseImage(240, 80, 265, 100, , "WonderPick", 1, failSafeTime)) {
+            clickButton := FindOrLoseImage(100, 367, 190, 480, 100, "Button", 0, failSafeTime)
+            if(clickButton) {
+                StringSplit, pos, clickButton, `,
+                if (scaleParam = 287) {
+                    pos2 += 5
+                }
+                adbClick(pos1, pos2)
+                Delay(3)
+            }
+        }
+
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        CreateStatusMessage("Waiting for WonderPick`n(" . failSafeTime . "/30 seconds)")
+        if (failSafeTime > 30)
+            return
+        Sleep, 500
+    }
+
+    ; Click the card
+    Sleep, 300
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick(183, 350)
+        if(FindOrLoseImage(160, 330, 200, 370, , "Card", 1, failSafeTime))
+            break
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        if (failSafeTime > 15)
+            break
+        Sleep, 500
+    }
+
+    ; Skip through the card reveal
+    Sleep, 2000
+    Loop, 10 {
+        adbClick(146, 494)
+        Sleep, 500
+        if (FindOrLoseImage(191, 393, 211, 411, , "Shop", 0))
+            break
+        if (FindOrLoseImage(240, 80, 265, 100, , "WonderPick", 0))
+            break
+    }
+
+    CreateStatusMessage("WonderPick check complete!",,,, false)
+}
+
+; NavigateToFriendsList - Navigate back to the friends list from anywhere
+NavigateToFriendsList() {
+    global failSafe
+
+    ; First go home
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick(35, 515)
+        Sleep, 1000
+        if (FindOrLoseImage(20, 500, 55, 530, , "Home", 0, failSafeTime))
+            break
+        if (FindOrLoseImage(191, 393, 211, 411, , "Shop", 0, failSafeTime))
+            break
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        if (failSafeTime > 30)
+            break
+    }
+
+    ; Now navigate to Social
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick(143, 518)
+        if(FindOrLoseImage(120, 500, 155, 530, , "Social", 0, failSafeTime))
+            break
+        Delay(5)
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        if (failSafeTime > 30)
+            break
+    }
+
+    ; Go to friends
+    FindImageAndClick(226, 100, 270, 135, , "Add", 38, 460, 500)
+    Delay(3)
+}
+
+; ScrollFriendList - Perform a scroll on the friends list
+ScrollFriendList() {
+    X := 138
+    Y1 := 380
+    Y2 := 200
+    Delay(10)
+    adbSwipe(X . " " . Y1 . " " . X . " " . Y2 . " " . 300)
+    Sleep, 1000
 }
 
 ; Attempts to extract a friend accounts's code and name from the screen, by taking screenshot and running OCR on specific regions.
