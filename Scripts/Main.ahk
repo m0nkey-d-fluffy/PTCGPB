@@ -979,8 +979,9 @@ RemoveNonVipFriends() {
 
 ; RemoveUsersFromListWithWonderPick - Remove users by name from a list, checking wonderpick periodically
 ; Removes 4 users, then checks wonderpick 3 times, repeating until 40 users are removed
+; IMPROVED: Scans names directly from friend list view (no click required) to avoid list reordering issues
 RemoveUsersFromListWithWonderPick() {
-    global GPTest, failSafe, scaleParam
+    global GPTest, failSafe, scaleParam, winTitle
 
     ; Configuration
     usersPerCycle := 4          ; Remove this many users before checking wonderpick
@@ -1036,9 +1037,7 @@ RemoveUsersFromListWithWonderPick() {
     ; Tracking variables
     totalRemoved := 0
     cycleRemoved := 0
-    friendIndex := 0
     scrolledWithoutMatch := 0
-    currentListIndex := 1       ; Track which name in the list we're looking for
 
     ; Main removal loop
     Loop {
@@ -1047,17 +1046,6 @@ RemoveUsersFromListWithWonderPick() {
             CreateStatusMessage("Completed! Removed " . totalRemoved . " users.`nGP Test finished.",,,, false)
             LogToFile("RemoveUsersFromListWithWonderPick: Completed - removed " . totalRemoved . " users", "GPTestLog.txt")
             return
-        }
-
-        ; Check if we've gone through all names in the list
-        if (currentListIndex > removeList.Length()) {
-            CreateStatusMessage("Finished list! Removed " . totalRemoved . " of " . maxRemovals . " target.`nRestarting from beginning of list...",,,, false)
-            currentListIndex := 1
-            if (scrolledWithoutMatch > 10) {
-                CreateStatusMessage("No more matching users found. Stopping.",,,, false)
-                LogToFile("RemoveUsersFromListWithWonderPick: No more matches found after " . totalRemoved . " removals", "GPTestLog.txt")
-                return
-            }
         }
 
         ; Check if it's time to do wonderpick checks
@@ -1079,89 +1067,69 @@ RemoveUsersFromListWithWonderPick() {
             NavigateToFriendsList()
 
             cycleRemoved := 0
-            friendIndex := 0
         }
 
-        ; Click on friend at current position
-        friendClickY := 195 + (95 * friendIndex)
-        if (FindImageAndClick(75, 400, 105, 420, , "Friend", 138, friendClickY, 500, 3)) {
-            Delay(1)
+        ; Scan all visible friends on the list (without clicking)
+        CreateStatusMessage("Scanning friend list for matches...",,,, false)
+        visibleFriends := ScanFriendListNames()
 
-            ; Parse the friend's name (we need names for this operation)
-            parseFriendResult := ParseFriendInfo(friendCode, friendName, parseFriendCodeResult, parseFriendNameResult, true)
+        ; Check each visible friend against our removal list
+        matchFound := false
+        matchIndex := 0
+        matchedParsedName := ""
+        matchedTargetName := ""
 
-            if (!parseFriendNameResult || friendName = "") {
-                CreateStatusMessage("Couldn't parse friend name. Skipping...",,,, false)
-                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
-                Delay(2)
-                if (friendIndex < 2)
-                    friendIndex++
-                else {
-                    ScrollFriendList()
-                    friendIndex := 0
-                }
+        for idx, friendInfo in visibleFriends {
+            parsedName := friendInfo.name
+            if (parsedName = "")
                 continue
-            }
 
-            ; Check if this friend's name matches any in our removal list
-            matchFound := false
-            matchedName := ""
-            for idx, targetName in removeList {
-                if (FuzzyNameMatch(friendName, targetName)) {
+            ; Check against all names in removal list
+            for listIdx, targetName in removeList {
+                if (FuzzyNameMatch(parsedName, targetName)) {
                     matchFound := true
-                    matchedName := targetName
+                    matchIndex := idx
+                    matchedParsedName := parsedName
+                    matchedTargetName := targetName
                     break
                 }
             }
+            if (matchFound)
+                break
+        }
 
-            if (matchFound) {
-                ; Remove this friend
-                CreateStatusMessage("Match found! Removing: " . friendName . "`n(Matched: " . matchedName . ")`nTotal removed: " . (totalRemoved + 1) . "/" . maxRemovals,,,, false)
-                LogToFile("RemoveUsersFromListWithWonderPick: Removing " . friendName . " (matched " . matchedName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
-                Sleep, 1000
+        if (matchFound) {
+            ; Found a match! Click on that specific friend and remove them
+            friendInfo := visibleFriends[matchIndex]
+            clickY := friendInfo.clickY
 
-                ; Perform the removal
-                FindImageAndClick(135, 355, 160, 385, , "Remove", 145, 407, 500)
-                FindImageAndClick(70, 395, 100, 420, , "Send2", 200, 372, 500)
-                Delay(1)
-                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
-                Delay(3)
+            CreateStatusMessage("Match found! Removing: " . matchedParsedName . "`n(Matched: " . matchedTargetName . ")`nTotal: " . (totalRemoved + 1) . "/" . maxRemovals,,,, false)
+            LogToFile("RemoveUsersFromListWithWonderPick: Removing " . matchedParsedName . " (matched " . matchedTargetName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
+            Sleep, 500
 
-                totalRemoved++
-                cycleRemoved++
-                scrolledWithoutMatch := 0
+            ; Click on the friend to open their profile
+            adbClick(138, clickY)
+            Delay(2)
 
-                ; Don't increment friendIndex since the list shifted
-            } else {
-                ; No match, skip this friend
-                CreateStatusMessage("No match: " . friendName . "`nLooking for matches in list...",,,, false)
-                Sleep, 500
-                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
-                Delay(2)
+            ; Perform the removal
+            FindImageAndClick(135, 355, 160, 385, , "Remove", 145, 407, 500)
+            FindImageAndClick(70, 395, 100, 420, , "Send2", 200, 372, 500)
+            Delay(1)
 
-                if (friendIndex < 2)
-                    friendIndex++
-                else {
-                    ScrollFriendList()
-                    friendIndex := 0
-                    scrolledWithoutMatch++
-                }
-            }
+            ; Return to friends list
+            FindImageAndClick(226, 100, 270, 135, , "Add", 143, 507, 500)
+            Delay(3)
+
+            totalRemoved++
+            cycleRemoved++
+            scrolledWithoutMatch := 0
+
+            ; Don't scroll - list will refresh with remaining friends
         } else {
-            ; Couldn't click on a friend, might need to scroll or we're at end
-            If (FindOrLoseImage(226, 100, 270, 135, , "Add", 0)) {
-                ; Small scroll to adjust
-                X := 138
-                Y1 := 380
-                Y2 := 355
-                Delay(3)
-                adbSwipe(X . " " . Y1 . " " . X . " " . Y2 . " " . 200)
-                Sleep, 500
-                scrolledWithoutMatch++
-            } else {
-                FindImageAndClick(226, 100, 270, 135, , "Add", 143, 508, 500)
-                Delay(3)
-            }
+            ; No match found in current view, scroll to see more friends
+            CreateStatusMessage("No matches in view. Scrolling... (" . scrolledWithoutMatch . "/15)",,,, false)
+            ScrollFriendList()
+            scrolledWithoutMatch++
         }
 
         ; Safety check - if we've scrolled a lot without finding matches, give up
@@ -1175,6 +1143,56 @@ RemoveUsersFromListWithWonderPick() {
             Return
         }
     }
+}
+
+; ScanFriendListNames - Scan the friend list screen and extract names via OCR
+; Returns an array of objects: [{name: "PlayerName", clickY: 195}, ...]
+ScanFriendListNames() {
+    global winTitle
+
+    visibleFriends := []
+
+    ; Friend list shows up to 3 friends at positions with 95px spacing
+    ; Friend 1: Y ~ 195, Friend 2: Y ~ 290, Friend 3: Y ~ 385
+    friendPositions := [{slotY: 175, clickY: 195}, {slotY: 270, clickY: 290}, {slotY: 365, clickY: 385}]
+
+    ; Take a screenshot of the current friend list
+    screenshotFile := GetTempDirectory() . "\" . winTitle . "_FriendList.png"
+    adbTakeScreenshot(screenshotFile)
+
+    ; OCR each friend slot's name region
+    ; Names appear roughly at X: 70-200, relative to each friend's Y position
+    for idx, pos in friendPositions {
+        ; Name region: X=70, Y=slotY, Width=130, Height=25
+        friendName := ParseFriendListName(screenshotFile, 70, pos.slotY, 130, 25)
+
+        friendInfo := {name: friendName, clickY: pos.clickY}
+        visibleFriends.Push(friendInfo)
+    }
+
+    return visibleFriends
+}
+
+; ParseFriendListName - Extract a name from a specific region of the friend list screenshot
+ParseFriendListName(screenshotFile, x, y, w, h) {
+    ; Try multiple scale factors for better OCR accuracy
+    blowUp := [200, 300, 400, 500]
+    allowedChars := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    validPattern := "^[a-zA-Z0-9]{3,20}$"
+
+    Loop, % blowUp.Length() {
+        pBitmap := CropAndFormatForOcr(screenshotFile, x, y, w, h, blowUp[A_Index])
+        output := GetTextFromBitmap(pBitmap, allowedChars)
+
+        ; Clean up the output
+        output := Trim(output)
+        output := RegExReplace(output, "\s+", "")  ; Remove whitespace
+
+        if (RegExMatch(output, validPattern))
+            return output
+    }
+
+    return ""
 }
 
 ; FuzzyNameMatch - Check if two names match with some tolerance for OCR errors
