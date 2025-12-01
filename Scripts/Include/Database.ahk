@@ -73,6 +73,68 @@ GetDeviceAccountFromXML() {
 }
 
 ;-------------------------------------------------------------------------------
+; LogXmlUidMapping - Track XML filename to UID mapping
+;-------------------------------------------------------------------------------
+LogXmlUidMapping(xmlFileName, deviceAccount) {
+    if (!xmlFileName || !deviceAccount) {
+        return
+    }
+
+    mappingPath := A_ScriptDir . "\..\Accounts\XML_UID_Mapping.csv"
+
+    ; Create CSV with headers if it doesn't exist
+    if (!FileExist(mappingPath)) {
+        header := "XML_Filename,Device_Account_UID,First_Seen,Last_Seen,Load_Count`n"
+        FileAppend, %header%, %mappingPath%
+    }
+
+    ; Read existing mappings
+    existingMappings := {}
+    if (FileExist(mappingPath)) {
+        FileRead, csvContent, %mappingPath%
+        Loop, Parse, csvContent, `n, `r
+        {
+            if (A_Index = 1)  ; Skip header
+                continue
+
+            if (A_LoopField = "")
+                continue
+
+            fields := StrSplit(A_LoopField, ",")
+            if (fields.Length() >= 5) {
+                existingMappings[fields[1]] := {UID: fields[2], FirstSeen: fields[3], LastSeen: fields[4], LoadCount: fields[5]}
+            }
+        }
+    }
+
+    ; Format current timestamp
+    timestamp := A_Now
+    FormatTime, timestamp, %timestamp%, yyyy-MM-dd HH:mm:ss
+
+    ; Update or create mapping
+    if (existingMappings.HasKey(xmlFileName)) {
+        ; Update existing entry
+        mapping := existingMappings[xmlFileName]
+        mapping.LastSeen := timestamp
+        mapping.LoadCount := mapping.LoadCount + 1
+        existingMappings[xmlFileName] := mapping
+    } else {
+        ; Create new entry
+        existingMappings[xmlFileName] := {UID: deviceAccount, FirstSeen: timestamp, LastSeen: timestamp, LoadCount: 1}
+    }
+
+    ; Rebuild CSV file
+    newContent := "XML_Filename,Device_Account_UID,First_Seen,Last_Seen,Load_Count`n"
+    for xmlFile, data in existingMappings {
+        newContent .= xmlFile . "," . data.UID . "," . data.FirstSeen . "," . data.LastSeen . "," . data.LoadCount . "`n"
+    }
+
+    ; Write updated CSV
+    FileDelete, %mappingPath%
+    FileAppend, %newContent%, %mappingPath%
+}
+
+;-------------------------------------------------------------------------------
 ; LogToTradesDatabase - Log card trades to CSV database
 ;-------------------------------------------------------------------------------
 LogToTradesDatabase(deviceAccount, cardTypes, cardCounts, screenShotFileName := "", shinedustValue := "") {

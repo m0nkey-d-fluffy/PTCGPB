@@ -287,6 +287,15 @@ loadAccount() {
 
     adbShell.StdIn.WriteLine("am start -n jp.pokemon.pokemontcgp/com.unity3d.player.UnityPlayerActivity")
 
+    ; Log XML to UID mapping after account is loaded
+    Sleep, 1000  ; Give time for the account to be fully written
+    deviceAccount := GetDeviceAccountFromXMLStandalone(loadDir, adbPath, adbPorts)
+    if (deviceAccount && fileName) {
+        ; Get just the filename without path
+        SplitPath, loadDir, xmlFileName
+        LogXmlUidMappingStandalone(xmlFileName, deviceAccount)
+    }
+
     ; Close the shell after all operations complete
     adbShell.Terminate()
     adbShell := ""
@@ -364,3 +373,106 @@ RunInstance:
         MsgBox, 16, Error, Could not find instance number for %winTitle%
     }
     return
+
+;-------------------------------------------------------------------------------
+; GetDeviceAccountFromXMLStandalone - Extract device account ID from XML
+;-------------------------------------------------------------------------------
+GetDeviceAccountFromXMLStandalone(xmlPath, adbPath, adbPort) {
+    deviceAccount := ""
+
+    ; First try to read from the provided XML file path
+    if (FileExist(xmlPath)) {
+        FileRead, xmlContent, %xmlPath%
+        if (RegExMatch(xmlContent, "i)<string name=""deviceAccount"">([^<]+)</string>", match)) {
+            deviceAccount := match1
+            return deviceAccount
+        }
+    }
+
+    ; Fallback: extract from device if needed
+    tempDir := A_ScriptDir . "\temp"
+    if !FileExist(tempDir)
+        FileCreateDir, %tempDir%
+
+    tempPath := tempDir . "\current_device_inject.xml"
+
+    RunWait, % adbPath . " -s 127.0.0.1:" . adbPort . " shell ""cp -f /data/data/jp.pokemon.pokemontcgp/shared_prefs/deviceAccount:.xml /sdcard/deviceAccount.xml""",, Hide
+    Sleep, 500
+
+    RunWait, % adbPath . " -s 127.0.0.1:" . adbPort . " pull /sdcard/deviceAccount.xml """ . tempPath . """",, Hide
+    Sleep, 500
+
+    if (FileExist(tempPath)) {
+        FileRead, xmlContent, %tempPath%
+        if (RegExMatch(xmlContent, "i)<string name=""deviceAccount"">([^<]+)</string>", match)) {
+            deviceAccount := match1
+        }
+        FileDelete, %tempPath%
+
+        RunWait, % adbPath . " -s 127.0.0.1:" . adbPort . " shell ""rm /sdcard/deviceAccount.xml""",, Hide
+    }
+
+    return deviceAccount
+}
+
+;-------------------------------------------------------------------------------
+; LogXmlUidMappingStandalone - Track XML filename to UID mapping
+;-------------------------------------------------------------------------------
+LogXmlUidMappingStandalone(xmlFileName, deviceAccount) {
+    if (!xmlFileName || !deviceAccount) {
+        return
+    }
+
+    mappingPath := A_ScriptDir . "\XML_UID_Mapping.csv"
+
+    ; Create CSV with headers if it doesn't exist
+    if (!FileExist(mappingPath)) {
+        header := "XML_Filename,Device_Account_UID,First_Seen,Last_Seen,Load_Count`n"
+        FileAppend, %header%, %mappingPath%
+    }
+
+    ; Read existing mappings
+    existingMappings := {}
+    if (FileExist(mappingPath)) {
+        FileRead, csvContent, %mappingPath%
+        Loop, Parse, csvContent, `n, `r
+        {
+            if (A_Index = 1)  ; Skip header
+                continue
+
+            if (A_LoopField = "")
+                continue
+
+            fields := StrSplit(A_LoopField, ",")
+            if (fields.Length() >= 5) {
+                existingMappings[fields[1]] := {UID: fields[2], FirstSeen: fields[3], LastSeen: fields[4], LoadCount: fields[5]}
+            }
+        }
+    }
+
+    ; Format current timestamp
+    timestamp := A_Now
+    FormatTime, timestamp, %timestamp%, yyyy-MM-dd HH:mm:ss
+
+    ; Update or create mapping
+    if (existingMappings.HasKey(xmlFileName)) {
+        ; Update existing entry
+        mapping := existingMappings[xmlFileName]
+        mapping.LastSeen := timestamp
+        mapping.LoadCount := mapping.LoadCount + 1
+        existingMappings[xmlFileName] := mapping
+    } else {
+        ; Create new entry
+        existingMappings[xmlFileName] := {UID: deviceAccount, FirstSeen: timestamp, LastSeen: timestamp, LoadCount: 1}
+    }
+
+    ; Rebuild CSV file
+    newContent := "XML_Filename,Device_Account_UID,First_Seen,Last_Seen,Load_Count`n"
+    for xmlFile, data in existingMappings {
+        newContent .= xmlFile . "," . data.UID . "," . data.FirstSeen . "," . data.LastSeen . "," . data.LoadCount . "`n"
+    }
+
+    ; Write updated CSV
+    FileDelete, %mappingPath%
+    FileAppend, %newContent%, %mappingPath%
+}

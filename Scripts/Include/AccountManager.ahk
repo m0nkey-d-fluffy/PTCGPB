@@ -139,6 +139,12 @@ loadAccount() {
 
     getMetaData()
 
+    ; Log XML to UID mapping after account is loaded
+    deviceAccount := GetDeviceAccountFromXML()
+    if (deviceAccount && accountFileName) {
+        LogXmlUidMapping(accountFileName, deviceAccount)
+    }
+
     return loadFile
 }
 
