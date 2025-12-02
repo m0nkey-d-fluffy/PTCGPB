@@ -1095,21 +1095,22 @@ RemoveUsersFromListWithWonderPick() {
             if (validNamesCount > 0)
                 previousNames := currentNames
 
-            ; Check each visible friend against our removal list
-            for idx, friendInfo in visibleFriends {
-                parsedName := friendInfo.name
-                if (parsedName = "")
-                    continue
+            ; CHECK IN ORDER OF REMOVAL LIST (priority-based removal)
+            ; Loop through removal list in order, checking if any visible friend matches
+            for listIdx, targetName in removeList {
+                ; Check each visible friend for this specific target
+                for idx, friendInfo in visibleFriends {
+                    parsedName := friendInfo.name
+                    if (parsedName = "")
+                        continue
 
-                ; Check against all names in removal list
-                for listIdx, targetName in removeList {
                     if (FuzzyNameMatch(parsedName, targetName)) {
                         ; === FOUND A MATCH! Remove this friend ===
                         matchFound := true
                         clickY := friendInfo.clickY
 
-                        CreateStatusMessage("MATCH: " . parsedName . "`n-> " . targetName . "`nRemoving... (" . (totalRemoved + 1) . "/" . maxRemovals . ")",,,, false)
-                        LogToFile("RemoveUsersFromListWithWonderPick: Removing " . parsedName . " (matched " . targetName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
+                        CreateStatusMessage("MATCH: " . parsedName . "`n-> " . targetName . " (target #" . listIdx . ")`nRemoving... (" . (totalRemoved + 1) . "/" . maxRemovals . ")",,,, false)
+                        LogToFile("RemoveUsersFromListWithWonderPick: Removing " . parsedName . " (matched target #" . listIdx . ": " . targetName . ") - #" . (totalRemoved + 1), "GPTestLog.txt")
                         Sleep, 500
 
                         ; Click on the friend to open their profile
