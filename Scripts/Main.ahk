@@ -1075,16 +1075,25 @@ RemoveUsersFromListWithWonderPick() {
 
             ; Build a string of current names to detect end of list
             currentNames := ""
+            validNamesCount := 0
             for idx, friendInfo in visibleFriends {
-                currentNames .= friendInfo.name . "|"
+                if (friendInfo.name != "") {
+                    currentNames .= friendInfo.name . "|"
+                    validNamesCount++
+                }
             }
 
-            ; Check if we've reached the end (same names as before after scrolling)
-            if (currentNames = previousNames && scrollCount > 0) {
-                CreateStatusMessage("Reached end of friend list.",,,, false)
+            ; Check if we've reached the end (same VALID names as before after scrolling)
+            ; Only trigger if we have at least one valid name
+            if (validNamesCount > 0 && currentNames = previousNames && scrollCount > 0) {
+                CreateStatusMessage("Reached end of friend list (same names detected).",,,, false)
+                LogToFile("RemoveUsersFromListWithWonderPick: End of list detected at scroll " . scrollCount, "GPTestLog.txt")
                 break
             }
-            previousNames := currentNames
+
+            ; If we got valid names, save them for next comparison
+            if (validNamesCount > 0)
+                previousNames := currentNames
 
             ; Check each visible friend against our removal list
             for idx, friendInfo in visibleFriends {
@@ -1124,7 +1133,7 @@ RemoveUsersFromListWithWonderPick() {
             ; No match in current view, scroll down to see more
             ScrollFriendList()
             scrollCount++
-            Sleep, 500
+            Sleep, 1500  ; Increased delay to let UI settle after scroll
 
             if (!GPTest)
                 return
