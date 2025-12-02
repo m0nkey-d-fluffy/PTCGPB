@@ -118,7 +118,7 @@ Loop {
         Gui, ToolBar:Add, Button, % "x" . (buttonWidth * 2) . " y0 w" . buttonWidth . " h25 gResumeScript", Resume (Shift+F6)
         Gui, ToolBar:Add, Button, % "x" . (buttonWidth * 3) . " y0 w" . buttonWidth . " h25 gStopScript", Stop (Shift+F7)
         Gui, ToolBar:Add, Button, % "x" . (buttonWidth * 4) . " y0 w" . buttonWidth . " h25 gShowStatusMessages", Status (Shift+F8)
-        Gui, ToolBar:Add, Button, % "x" . (buttonWidth * 5) . " y0 w" . buttonWidth . " h25 gTestScript", GP Test (Shift+F9)
+        Gui, ToolBar:Add, Button, % "x" . (buttonWidth * 5) . " y0 w" . buttonWidth . " h25 gTestScript", Unbury (Shift+F9)
         DllCall("SetWindowPos", "Ptr", WinExist(), "Ptr", 1  ; HWND_BOTTOM
                 , "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x13)  ; SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE
         Gui, ToolBar:Show, NoActivate x%x4% y%y4%  w275 h30
