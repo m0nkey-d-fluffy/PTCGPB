@@ -1060,7 +1060,7 @@ RemoveUsersFromListWithWonderPick() {
         ; === SCROLL THROUGH ENTIRE LIST looking for a match ===
         matchFound := false
         scrollCount := 0
-        maxScrolls := 50  ; Safety limit
+        maxScrolls := 30  ; Reduced from 50
         previousNames := ""
 
         Loop {
@@ -1179,17 +1179,17 @@ ScanFriendListNames() {
 
     ; Friend list shows up to 3 friends at positions with 95px spacing
     ; Friend 1: Y ~ 195, Friend 2: Y ~ 290, Friend 3: Y ~ 385
-    friendPositions := [{slotY: 175, clickY: 195}, {slotY: 270, clickY: 290}, {slotY: 365, clickY: 385}]
+    friendPositions := [{slotY: 165, clickY: 195}, {slotY: 260, clickY: 290}, {slotY: 355, clickY: 385}]
 
     ; Take a screenshot of the current friend list
     screenshotFile := GetTempDirectory() . "\" . winTitle . "_FriendList.png"
     adbTakeScreenshot(screenshotFile)
 
     ; OCR each friend slot's name region
-    ; Names appear roughly at X: 70-200, relative to each friend's Y position
+    ; Expanded search area - scan full width of screen
     for idx, pos in friendPositions {
-        ; Name region: X=70, Y=slotY, Width=130, Height=25
-        friendName := ParseFriendListName(screenshotFile, 70, pos.slotY, 130, 25)
+        ; Full width search: X=0, Y=slotY, Width=280 (full screen), Height=40 (taller)
+        friendName := ParseFriendListName(screenshotFile, 0, pos.slotY, 280, 40)
 
         friendInfo := {name: friendName, clickY: pos.clickY}
         visibleFriends.Push(friendInfo)
@@ -1201,10 +1201,11 @@ ScanFriendListNames() {
 ; ParseFriendListName - Extract a name from a specific region of the friend list screenshot
 ParseFriendListName(screenshotFile, x, y, w, h) {
     ; Try multiple scale factors for better OCR accuracy
-    blowUp := [200, 300, 400, 500]
+    blowUp := [200, 300, 400, 500, 600]
     allowedChars := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     validPattern := "^[a-zA-Z0-9]{3,20}$"
 
+    bestMatch := ""
     Loop, % blowUp.Length() {
         pBitmap := CropAndFormatForOcr(screenshotFile, x, y, w, h, blowUp[A_Index])
         output := GetTextFromBitmap(pBitmap, allowedChars)
@@ -1213,11 +1214,23 @@ ParseFriendListName(screenshotFile, x, y, w, h) {
         output := Trim(output)
         output := RegExReplace(output, "\s+", "")  ; Remove whitespace
 
-        if (RegExMatch(output, validPattern))
+        ; Log what we're finding for debugging
+        if (output != "")
+            LogToFile("OCR found at Y=" . y . " scale=" . blowUp[A_Index] . ": '" . output . "'", "GPTestLog.txt")
+
+        if (RegExMatch(output, validPattern)) {
+            LogToFile("OCR VALID match: '" . output . "'", "GPTestLog.txt")
             return output
+        } else if (StrLen(output) > StrLen(bestMatch)) {
+            bestMatch := output
+        }
     }
 
-    return ""
+    ; If no valid match, return the longest string we found
+    if (bestMatch != "")
+        LogToFile("OCR no valid pattern, best effort: '" . bestMatch . "'", "GPTestLog.txt")
+
+    return bestMatch
 }
 
 ; FuzzyNameMatch - Check if two names match with some tolerance for OCR errors
