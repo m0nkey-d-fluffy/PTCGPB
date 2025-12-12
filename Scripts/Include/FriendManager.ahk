@@ -61,15 +61,6 @@ AddFriends(renew := false, getFC := false) {
         failSafeTime := (A_TickCount - failSafe) // 1000
         CreateStatusMessage("Waiting for Social`n(" . failSafeTime . "/90 seconds)")
     }
-    IniRead, showcaseNumber, %A_ScriptDir%\..\Settings.ini, UserSettings, showcaseLikes
-    IniRead, showcaseEnabled, %A_ScriptDir%\..\Settings.ini, UserSettings, showcaseEnabled
-    if (showcaseNumber > 0 && showcaseEnabled = 1 && packsThisRun = 0) {
-        showcaseNumber -= 1
-        IniWrite, %showcaseNumber%, %A_ScriptDir%\..\Settings.ini, UserSettings, showcaseLikes
-        showcaseLikes()
-        FindImageAndClick(120, 500, 155, 530, , "Social", 143, 518, 500)
-    }
-
     FindImageAndClick(226, 100, 270, 135, , "Add", 38, 460, 500)
     FindImageAndClick(205, 430, 255, 475, , "Search", 240, 120, 1500)
     if(getFC) {
@@ -159,6 +150,60 @@ AddFriends(renew := false, getFC := false) {
         sleep, 1000
     }
     return n ;return added friends so we can dynamically update the .txt in the middle of a run without leaving friends at the end
+}
+
+;-------------------------------------------------------------------------------
+; ProcessShowcaseLikes - Process showcase likes independently
+;-------------------------------------------------------------------------------
+; This function can be called independently without needing friend management
+; It navigates to Social, processes showcase likes, and returns to main
+ProcessShowcaseLikes() {
+    global packsThisRun, scaleParam, scriptName
+    
+    ; Read showcase settings
+    IniRead, showcaseNumber, %A_ScriptDir%\..\Settings.ini, UserSettings, showcaseLikes
+    IniRead, showcaseEnabled, %A_ScriptDir%\..\Settings.ini, UserSettings, showcaseEnabled
+    
+    ; Check if we should process showcase likes
+    if (showcaseNumber <= 0 || showcaseEnabled != 1) {
+        return false
+    }
+    
+    ; Navigate to Social menu
+    failSafe := A_TickCount
+    failSafeTime := 0
+    Loop {
+        adbClick_wbb(143, 518)
+        if(FindOrLoseImage(120, 500, 155, 530, , "Social", 0, failSafeTime)) {
+            break
+        }
+        else {
+            Delay(3)
+            clickButton := FindOrLoseImage(75, 360, 195, 410, 75, "Button", 0)
+            if(clickButton) {
+                StringSplit, pos, clickButton, `,
+                if (scaleParam = 287) {
+                    pos2 += 5
+                }
+                adbClick_wbb(pos1, pos2)
+            }
+        }
+        failSafeTime := (A_TickCount - failSafe) // 1000
+        CreateStatusMessage("Waiting for Social (Showcase Likes)`n(" . failSafeTime . "/90 seconds)")
+    }
+    
+    ; Decrement showcase counter and process likes
+    showcaseNumber -= 1
+    IniWrite, %showcaseNumber%, %A_ScriptDir%\..\Settings.ini, UserSettings, showcaseLikes
+    showcaseLikes()
+    
+    ; Return to Social menu after processing
+    FindImageAndClick(120, 500, 155, 530, , "Social", 143, 518, 500)
+    
+    ; Return to main/home
+    FindImageAndClick(20, 500, 55, 530, , "Home", 40, 516, 500)
+    
+    return true
 }
 
 ;-------------------------------------------------------------------------------
