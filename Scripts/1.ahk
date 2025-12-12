@@ -598,6 +598,12 @@ if(DeadCheck = 1 && deleteMethod != "Create Bots (13P)") {
             }
         }
 
+        ; Process showcase likes after daily packs are opened for injection methods
+        if(deleteMethod = "Inject Wonderpick 96P+" || deleteMethod = "Inject 13P+") {
+            GoToMain()
+            ProcessShowcaseLikes()
+        }
+
         MidOfRun:
 		
         if(deleteMethod = "Inject 13P+" || deleteMethod = "Inject Missions" && accountOpenPacks >= maxAccountPackNum)
