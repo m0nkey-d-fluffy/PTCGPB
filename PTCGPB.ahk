@@ -117,6 +117,14 @@ global GUI_HEIGHT := 370
 global MainGuiName
 global MuMuv5
 
+; ========================================
+; SHOWCASE LIKES CONFIGURATION
+; ========================================
+; Edit these two values to set your showcase likes range
+global SHOWCASE_MIN := 121     ; Minimum showcases per day
+global SHOWCASE_MAX := 350     ; Maximum showcases per day
+; ========================================
+
 if not A_IsAdmin
 {
     Run *RunAs "%A_ScriptFullPath%"
@@ -1181,7 +1189,7 @@ ShowToolsAndSystemSettings:
     yPos += 20
     Gui, ToolsAndSystemSelect:Add, Checkbox, % (statusMessage ? "Checked" : "") " vstatusMessage_Popup x" . col1X . " y" . yPos . " cWhite", Status Messages
     yPos += 20
-    Gui, ToolsAndSystemSelect:Add, Checkbox, % (showcaseEnabled ? "Checked" : "") " vshowcaseEnabled_Popup x" . col1X . " y" . yPos . " cWhite", 5x Showcase Likes
+    Gui, ToolsAndSystemSelect:Add, Checkbox, % (showcaseEnabled ? "Checked" : "") " vshowcaseEnabled_Popup x" . col1X . " y" . yPos . " cWhite", % SHOWCASE_MIN . "-" . SHOWCASE_MAX . "x Showcase Likes"
     yPos += 20
     
     Gui, ToolsAndSystemSelect:Add, Checkbox, % (claimDailyMission ? "Checked" : "") " vclaimDailyMission_Popup x" . col1X . " y" . yPos . " cWhite", Claim Daily 4 Hourglasses
@@ -2097,7 +2105,8 @@ CreateDefaultSettingsFile() {
       iniContent .= "statusMessage=1`n"
       iniContent .= "minStarsEnabled=0`n"
       iniContent .= "showcaseEnabled=0`n"
-      iniContent .= "showcaseLikes=5`n"
+      Random, randomShowcaseLikes, %SHOWCASE_MIN%, %SHOWCASE_MAX%
+      iniContent .= "showcaseLikes=" . randomShowcaseLikes . "`n"
       iniContent .= "rowGap=90`n"
       iniContent .= "variablePackCount=15`n"
       iniContent .= "claimSpecialMissions=0`n"
@@ -2300,7 +2309,8 @@ SaveAllSettings() {
    iniContent_Second .= "maxWaitHours=" maxWaitHours "`n"
    iniContent_Second .= "skipMissionsInjectMissions=" skipMissionsInjectMissions "`n"
    iniContent_Second .= "showcaseEnabled=" showcaseEnabled "`n"
-   iniContent_Second .= "showcaseLikes=5`n"
+   Random, randomShowcaseLikes, %SHOWCASE_MIN%, %SHOWCASE_MAX%
+   iniContent_Second .= "showcaseLikes=" . randomShowcaseLikes . "`n"
    iniContent_Second .= "minStarsA1Mewtwo=" minStarsA1Mewtwo "`n"
    iniContent_Second .= "minStarsA1Charizard=" minStarsA1Charizard "`n"
    iniContent_Second .= "minStarsA1Pikachu=" minStarsA1Pikachu "`n"
